@@ -118,7 +118,8 @@ def build_configs(trigger: str, force_all: bool, has_aws_credentials: bool) -> l
         MatrixConfig('minimum-deps', 'py', MAIN_PLATFORM, '3.11', uv_options='--no-dev --resolution lowest-direct'),
     ]
 
-    if trigger == 'pull_request':
+    if trigger == 'pull_request':  # FORK-ONLY HARNESS: run the merge-queue Windows full-suite legs only
+        configs = [MatrixConfig('standard', 'py', 'windows-2025', py) for py in ('3.11', '3.14')]
         # On every push to a PR we run only the slim tests. It is strictly a subset of what the merge queue runs.
         slim_pytest = DEFAULT_PYTEST + ' ' + ' '.join(SLIM_TESTS)
         configs.extend(
@@ -189,6 +190,8 @@ def build_configs(trigger: str, force_all: bool, has_aws_credentials: bool) -> l
 
     # With pytest-xdist[psutil], `-n auto` counts physical cores, which is 2 on the 4-vCPU windows-2025 runner.
     # `-n logical` uses all 4 vCPUs there.
+    if trigger == 'pull_request':
+        configs = [c for c in configs if c.display_name_prefix == 'standard']
     configs = [cfg._replace(xdist_workers='logical') if cfg.os.startswith('windows') else cfg for cfg in configs]
 
     configs.sort(key=lambda cfg: cfg.display_name)
