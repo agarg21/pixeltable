@@ -80,6 +80,7 @@ class MatrixConfig(NamedTuple):
     uv_options: str = ''
     pytest_options: str = DEFAULT_PYTEST
     pre_test_cmd: str = ''  # Extra bash command to be run just before tests
+    xdist_workers: str = 'auto'  # Value for pytest's `-n` option
 
     @property
     def display_name(self) -> str:
@@ -95,6 +96,7 @@ class MatrixConfig(NamedTuple):
             'uv-options': self.uv_options,
             'pytest-options': self.pytest_options,
             'pre-test-cmd': self.pre_test_cmd,
+            'xdist-workers': self.xdist_workers,
         }
 
 
@@ -116,7 +118,8 @@ def build_configs(trigger: str, force_all: bool, has_aws_credentials: bool) -> l
         MatrixConfig('minimum-deps', 'py', MAIN_PLATFORM, '3.11', uv_options='--no-dev --resolution lowest-direct'),
     ]
 
-    if trigger == 'pull_request':
+    if trigger == 'pull_request':  # FORK-ONLY HARNESS: run the merge-queue Windows full-suite legs only
+        configs = [MatrixConfig('standard', 'py', 'windows-2025', py) for py in ('3.11', '3.14')]
         # On every push to a PR we run only the slim tests. It is strictly a subset of what the merge queue runs.
         slim_pytest = DEFAULT_PYTEST + ' ' + ' '.join(SLIM_TESTS)
         configs.extend(
@@ -184,6 +187,12 @@ def build_configs(trigger: str, force_all: bool, has_aws_credentials: bool) -> l
                     pre_test_cmd=f'export PIXELTABLE_OUTPUT_MEDIA_DEST={new_bucket_addr()}',
                 )
             )
+
+    # With pytest-xdist[psutil], `-n auto` counts physical cores, which is 2 on the 4-vCPU windows-2025 runner.
+    # `-n logical` uses all 4 vCPUs there.
+    if trigger == 'pull_request':
+        configs = [c for c in configs if c.display_name_prefix == 'standard']
+    configs = [cfg._replace(xdist_workers='logical') if cfg.os.startswith('windows') else cfg for cfg in configs]
 
     configs.sort(key=lambda cfg: cfg.display_name)
     return configs
