@@ -80,6 +80,7 @@ class MatrixConfig(NamedTuple):
     uv_options: str = ''
     pytest_options: str = DEFAULT_PYTEST
     pre_test_cmd: str = ''  # Extra bash command to be run just before tests
+    xdist_workers: str = 'auto'  # Value for pytest's `-n` option
 
     @property
     def display_name(self) -> str:
@@ -95,6 +96,7 @@ class MatrixConfig(NamedTuple):
             'uv-options': self.uv_options,
             'pytest-options': self.pytest_options,
             'pre-test-cmd': self.pre_test_cmd,
+            'xdist-workers': self.xdist_workers,
         }
 
 
@@ -119,17 +121,8 @@ def build_configs(trigger: str, force_all: bool, has_aws_credentials: bool) -> l
     if trigger == 'pull_request':
         # On every push to a PR we run only the slim tests. It is strictly a subset of what the merge queue runs.
         slim_pytest = DEFAULT_PYTEST + ' ' + ' '.join(SLIM_TESTS)
-        # With pytest-xdist[psutil], `-n auto` counts physical cores, which is 2 on the 4-vCPU windows-2025 runner.
-        # Appending `-n logical` (the last -n wins) uses all 4 vCPUs on the Windows leg, the slowest PR check.
         configs.extend(
-            MatrixConfig(
-                'slim',
-                'py',
-                platform,
-                '3.11',
-                pytest_options=slim_pytest + (' -n logical' if platform.startswith('windows') else ''),
-            )
-            for platform in ALL_PLATFORMS
+            MatrixConfig('slim', 'py', platform, '3.11', pytest_options=slim_pytest) for platform in ALL_PLATFORMS
         )
         # Also exercise the newest supported Python on the main platform
         configs.append(MatrixConfig('slim', 'py', MAIN_PLATFORM, '3.14', pytest_options=slim_pytest))
@@ -193,6 +186,10 @@ def build_configs(trigger: str, force_all: bool, has_aws_credentials: bool) -> l
                     pre_test_cmd=f'export PIXELTABLE_OUTPUT_MEDIA_DEST={new_bucket_addr()}',
                 )
             )
+
+    # With pytest-xdist[psutil], `-n auto` counts physical cores, which is 2 on the 4-vCPU windows-2025 runner.
+    # `-n logical` uses all 4 vCPUs there.
+    configs = [cfg._replace(xdist_workers='logical') if cfg.os.startswith('windows') else cfg for cfg in configs]
 
     configs.sort(key=lambda cfg: cfg.display_name)
     return configs
